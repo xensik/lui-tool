@@ -25,6 +25,8 @@ public:
     template <typename T>
     auto read() -> T
     {
+        if(pos_ >= size_) { LOG_ERROR("buffer read overflow %lX", pos_); }
+
         auto ret = *reinterpret_cast<T*>(data_.data() + pos_);
         pos_ += sizeof(T);
         return ret;

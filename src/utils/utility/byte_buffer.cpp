@@ -97,6 +97,8 @@ void byte_buffer::write_opaque_string(std::uint16_t id, const std::string& data)
 
 auto byte_buffer::read_string() -> std::string
 {
+    if(pos_ >= size_) { LOG_ERROR("buffer read overflow %lX", pos_); }
+
     auto ret = std::string(reinterpret_cast<const char*>(data_.data() + pos_));
     pos_ += ret.size() + 1;
     return ret;

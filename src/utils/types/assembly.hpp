@@ -26,67 +26,82 @@ enum class object_type
     TSTRUCT,
 };
 
-struct instruction
-{
-    std::uint8_t A;
-    std::uint8_t B;
-    std::uint8_t C;
-    std::uint8_t op;
-};
-
 struct constant
 {
     object_type type;
-    std::string data;
+    std::string value;
+
+    constant(object_type type, const std::string& value): type(type), value(value) {}
 };
 
-struct data
+struct typeinfo
 {
     std::uint32_t id;
-    std::uint32_t unk; // a count, something about name, pointer size? length?
     std::string name;
+
+    typeinfo(std::uint32_t id, const std::string& name) : id(id), name(name) {}
 };
 
-struct file_header
+struct instruction
 {
-    std::uint32_t magic;                // HKS_DUMP_SIGNATURE 1B 4C 75 61 : 0x61754C1B
-    std::uint8_t lua_version;           // 0x51
-    std::uint8_t format_version;        // 0x0D
-    std::uint8_t endian_swap;           // 0x01
-    std::uint8_t size_of_int;           // 0x04
-    std::uint8_t size_of_sizeT;         //  ?
-    std::uint8_t size_of_intruction;    // 0x04
-    std::uint8_t size_of_lua_number;    // 0x04
-    std::uint8_t integral_flag;         // 0x01
-    std::uint8_t game_byte;             // 0x03
-    std::uint8_t ref_mode;              // 0x01
-    std::uint32_t datatype_count;       // 13
-    std::vector<data> datatypes;
+    std::uint32_t value;
+
+    std::uint8_t op;
+    std::uint32_t a;
+    std::uint32_t b;
+    std::uint32_t c;
+    std::uint32_t Bx;
+    std::int32_t SBx;
+    bool szero;
+
+    instruction(std::uint32_t value, std::uint8_t op, std::uint32_t a, std::uint32_t b,
+        std::uint32_t c, std::uint32_t Bx, std::int32_t SBx, bool szero)
+        : value(value), op(op), a(a), b(b), c(c), Bx(Bx), SBx(SBx), szero(szero) {}
 };
 
 struct function
 {
-    // prologue
     std::uint32_t upval_count;
     std::uint32_t param_count;
     std::uint8_t  flags;
     std::uint32_t register_count;
-    std::uint32_t instruction_count;
-    
-    // somebytes
-
-    // insts
-    std::vector<instruction> instructions; // read inst[num_instructions]; 4 bytes * num
-    
-    // consts
+    std::uint64_t instruction_count;
+    std::vector<std::unique_ptr<instruction>> instructions;
     std::uint32_t constant_count;
-    std::vector<constant> constants; // read const type: 1 byte, read const data ...
-
-    // epilogue
-    std::uint32_t unknown_debug;
+    std::vector<std::unique_ptr<constant>> constants;
+    std::uint32_t debug;
     std::uint32_t sub_func_count;
-    std::vector<function> sub_funcs;
+    std::vector<std::unique_ptr<function>> sub_funcs;
 };
+
+struct header
+{
+    std::uint32_t magic;                // HKS_DUMP_SIGNATURE 1B 4C 75 61 : 0x61754C1B
+    std::uint8_t lua_version;           // 0x51
+    std::uint8_t format_version;        // 0x0D
+    std::uint8_t endianness;            // 0x01
+    std::uint8_t size_of_int;           // 0x04
+    std::uint8_t size_of_size_t;        //  ?
+    std::uint8_t size_of_intruction;    // 0x04
+    std::uint8_t size_of_lua_number;    // 0x04
+    std::uint8_t integral_flag;         // 0x01
+    std::uint8_t build_flags;           // 0x03
+    std::uint8_t referenced_mode;       // 0x01
+    std::uint32_t type_count;           // 13
+    std::vector<typeinfo> types;
+};
+
+struct file
+{
+    header header;
+    std::unique_ptr<function> main;
+};
+
+using constant_ptr = std::unique_ptr<constant>;
+using header_ptr = std::unique_ptr<header>;
+using instruction_ptr = std::unique_ptr<instruction>;
+using function_ptr = std::unique_ptr<function>;
+using file_ptr = std::unique_ptr<file>;
 
 } // namespace lui
 

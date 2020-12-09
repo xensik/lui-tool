@@ -13,13 +13,18 @@ class disassembler : public lui::disassembler
 {
     utils::byte_buffer_ptr buffer_;
     utils::byte_buffer_ptr output_;
+    lui::file_ptr file_;
 
 public:
     auto output() -> std::vector<std::uint8_t>;
     void disassemble(std::vector<std::uint8_t>& data);
-
-private:
-
+    void disassemble_header();
+    void disassemble_functions();
+    void disassemble_prototype();
+    void disassemble_function(const lui::function_ptr& func);
+    void disassemble_instruction(const lui::function_ptr& func);
+    void disassemble_constant(const lui::function_ptr& func);
+    void disassemble_opcode(const lui::instruction_ptr& inst);
 };
 
 } // namespace IW6
