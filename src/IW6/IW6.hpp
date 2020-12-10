@@ -13,6 +13,44 @@
 
 namespace IW6
 {
+/*=======================================================
+Instruction format
+
+    'OP'  : 7 bits
+    'A'   : 8 bits
+    'B'   : 8 bits
+    'C'   : 9 bits
+    'Bx'  : 17 bits ('B' and 'C' together)
+    'sBx' : signed Bx
+=======================================================*/
+
+#define SIZE_A          8
+#define SIZE_C          9
+#define SIZE_B          8
+#define SIZE_Bx         17
+#define SIZE_OP         7
+
+#define POS_A           0
+#define POS_C           8
+#define POS_B           17
+#define POS_Bx          8
+#define POS_OP          25
+
+#define MASK_A  0x000000FF
+#define MASK_C  0x0001FF00
+#define MASK_B  0x01FE0000
+#define MASK_Bx 0x01FFFF00
+#define MASK_OP 0xFE000000
+
+#define MAXARG_Bx        ((1 << SIZE_Bx) - 1)
+#define MAXARG_sBx       (MAXARG_Bx >> 1)
+
+#define GET_OPCODE(i)   ((int)(value & MASK_OP) >> POS_OP)
+#define GETARG_A(i)     ((int)(value & MASK_A) >> POS_A)
+#define GETARG_B(i)     ((int)(value & MASK_B) >> POS_B)
+#define GETARG_C(i)    ((int)(value & MASK_C) >> POS_C)
+#define GETARG_Bx(i)    ((int)(value & MASK_Bx) >> POS_Bx)
+#define GETARG_sBx(i)   (GETARG_Bx(i) - MAXARG_sBx)
 
 enum class opcode : std::uint8_t
 {

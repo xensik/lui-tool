@@ -9,6 +9,14 @@
 namespace lui
 {
 
+enum class instruction_mode
+{
+    unset,
+    ABC,
+    ABx,
+    AsBx,
+};
+
 enum class object_type
 {
     TNIL,
@@ -44,19 +52,22 @@ struct typeinfo
 
 struct instruction
 {
+    std::uint32_t index;
     std::uint32_t value;
-
-    std::uint8_t op;
-    std::uint32_t a;
-    std::uint32_t b;
-    std::uint32_t c;
+    std::string data;
+    instruction_mode mode;
+    std::uint8_t OP;
+    std::uint32_t A;
+    std::uint32_t B;
+    std::uint32_t C;
     std::uint32_t Bx;
-    std::int32_t SBx;
-    bool szero;
+    std::int32_t sBx;
+    bool sZero;
 
-    instruction(std::uint32_t value, std::uint8_t op, std::uint32_t a, std::uint32_t b,
-        std::uint32_t c, std::uint32_t Bx, std::int32_t SBx, bool szero)
-        : value(value), op(op), a(a), b(b), c(c), Bx(Bx), SBx(SBx), szero(szero) {}
+    instruction(std::uint32_t index, std::uint32_t value, std::uint8_t OP, std::uint32_t A,
+        std::uint32_t B, std::uint32_t C, std::uint32_t Bx, std::int32_t sBx, bool sZero)
+        : index(index),value(value), OP(OP), A(A), B(B), C(C), Bx(Bx), sBx(sBx), 
+            sZero(sZero), mode(instruction_mode::unset) {}
 };
 
 struct function
