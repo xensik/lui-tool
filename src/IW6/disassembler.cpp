@@ -60,7 +60,7 @@ void disassembler::disassemble_header()
         auto length = buffer_->read<std::uint32_t>();
         auto name = buffer_->read_string();
 
-        file_->header.types.push_back(lui::typeinfo(id, name));
+        file_->header.types.push_back(lui::type_info(id, name));
     }
 }
 
@@ -84,7 +84,7 @@ void disassembler::disassemble_function(const lui::function_ptr& func)
 
     func->upval_count = buffer_->read<std::uint32_t>(); // always 0
     func->param_count = buffer_->read<std::uint32_t>();
-    func->flags = buffer_->read<std::uint8_t>();        // only main func = 2
+    func->vararg_flags = buffer_->read<std::uint8_t>();
     func->register_count = buffer_->read<std::uint32_t>();
     func->instruction_count = buffer_->read<std::uint64_t>();
 
@@ -147,23 +147,23 @@ void disassembler::disassemble_instruction(const lui::function_ptr& func)
 void disassembler::disassemble_constant(const lui::function_ptr& func)
 {
     std::string data;
-    auto type = lui::object_type(buffer_->read<std::uint8_t>());
+    auto type = lui::data_type(buffer_->read<std::uint8_t>());
 
     switch(type)
     {
-        case lui::object_type::TNIL:
+        case lui::data_type::TNIL:
             data = "nil";
         break;
-        case lui::object_type::TBOOLEAN:
+        case lui::data_type::TBOOLEAN:
             data = ((bool)buffer_->read<std::uint8_t>()) ? "true" : "false";
         break;
-        case lui::object_type::TLIGHTUSERDATA:
+        case lui::data_type::TLIGHTUSERDATA:
             data = utils::string::va("%lld", buffer_->read<std::uint64_t>());
         break;
-        case lui::object_type::TNUMBER:
+        case lui::data_type::TNUMBER:
             data = utils::string::va("%g", buffer_->read<float>());
         break;
-        case lui::object_type::TSTRING:
+        case lui::data_type::TSTRING:
             buffer_->read<std::uint64_t>();
             data = "\"" + buffer_->read_string() + "\"";
         break;
@@ -178,18 +178,21 @@ void disassembler::disassemble_constant(const lui::function_ptr& func)
 void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::instruction_ptr& inst)
 {
     auto op = opcode(inst->OP);
-    //printf("%s\n", resolver::opcode_name(op).data());
+    printf("%s\n", resolver::opcode_name(op).data());
                                                     // -------------------------------------
     switch(op)                                      // args    description
     {                                               // -------------------------------------
     case opcode::HKS_OPCODE_GETFIELD:               // A B C   R(A) = R(B)[K(C)]
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += std::string(find_constant(func, inst->C));
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_TEST:                   // A C     if not (R(A) <=> K(C)) then pc++
-        inst->mode = lui::instruction_mode::ABC;    //         c != 0, !R(A)
-        inst->data = find_constant(func, inst->C).value;  //   c == 0,  R(A)
+        inst->mode = lui::instruction_mode::ABC;    //         c != 0, !R(A)  c == 0,  R(A)
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->C));
         print_instruction(inst);                   
         break; // this have a constant somewhere B or C?
     case opcode::HKS_OPCODE_CALL_I:                 //
@@ -200,36 +203,77 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_EQ:                     //
+    case opcode::HKS_OPCODE_EQ:                     // A B C   if ((R(B) == RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_EQ_BK:                  //
+    case opcode::HKS_OPCODE_EQ_BK:                  // A B C   if ((K(B) == RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_GETGLOBAL:              // A Bx    R(A) := Gbl[Kst(Bx)] 
-        inst->mode = lui::instruction_mode::ABC;
+        inst->mode = lui::instruction_mode::ABx;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->Bx));
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_MOVE:                   // A B     R(A) := R(B)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SELF:                   //
+    case opcode::HKS_OPCODE_SELF:                   // A B C   R(A+1) := R(B); R(A) := R(B)[RK(C)]
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_RETURN:                 //
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_GETTABLE_S:             //
+// NEED REVISION
+    case opcode::HKS_OPCODE_GETTABLE_S:             // A B C   R(A) := R(B)[K(C)] ?
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_GETTABLE_N:             // 
@@ -242,15 +286,28 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         break;
     case opcode::HKS_OPCODE_LOADBOOL:               // A B C   R(A) := (Bool)B; if (C) pc++
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("BOOL(%d)", inst->B) + ", ";
+        inst->data += utils::string::va("BOOL(%d)", inst->C);
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_TFORLOOP:               //
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SETFIELD:               // A B C   R(B)[K(C)] = R(A) ????
+// NEED REVISION
+    case opcode::HKS_OPCODE_SETFIELD:               // A B C   K(B)[K(C)] = R(A)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_SETTABLE_S:             // A B C   R(A)[R(B)] := RK(C)
@@ -299,21 +356,23 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_LOADK:                  // A Bx    R(A) := Kst(Bx)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->Bx).value;
-        print_instruction(inst);
+        inst->mode = lui::instruction_mode::ABx;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->Bx));print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_LOADNIL:                // A B     R(A) := ... := R(B) := nil
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SETGLOBAL:
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->Bx).value;
+    case opcode::HKS_OPCODE_SETGLOBAL:              // A Bx    Gbl[Kst(Bx)] := R(A)
+        inst->mode = lui::instruction_mode::ABx;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->Bx));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_JMP:
+    case opcode::HKS_OPCODE_JMP:                    // sBx      pc += sBx
         inst->mode = lui::instruction_mode::AsBx;
+        inst->data += utils::string::va("PC(%d)", inst->sBx);
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_CALL_M:
@@ -352,116 +411,285 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_GETUPVAL:
+    case opcode::HKS_OPCODE_GETUPVAL:               // A B      R(A) := UpValue[B]
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("UPVAL(%d)",inst->B);
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SETUPVAL:
+    case opcode::HKS_OPCODE_SETUPVAL:               // A B      UpValue[B] := R(A)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("UPVAL(%d)",inst->B);
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_ADD:
+    case opcode::HKS_OPCODE_ADD:                    // A B C   R(A) := R(B) + RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_ADD_BK:
+    case opcode::HKS_OPCODE_ADD_BK:                 // A B C   R(A) := K(B) + RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SUB:
+    case opcode::HKS_OPCODE_SUB:                    //  A B C   R(A) := R(B) – RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SUB_BK:
+    case opcode::HKS_OPCODE_SUB_BK:                 //  A B C   R(A) := K(B) – RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_MUL:
+    case opcode::HKS_OPCODE_MUL:                    //  A B C   R(A) := R(B) * RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_MUL_BK:
+    case opcode::HKS_OPCODE_MUL_BK:                 //  A B C   R(A) := K(B) * RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_DIV:
+    case opcode::HKS_OPCODE_DIV:                    // A B C   R(A) := R(B) / RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_DIV_BK:
+    case opcode::HKS_OPCODE_DIV_BK:                 // A B C   R(A) := K(B) / RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+       inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_MOD:
+    case opcode::HKS_OPCODE_MOD:                    // A B C   R(A) := R(B) % RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_MOD_BK:
+    case opcode::HKS_OPCODE_MOD_BK:                 // A B C   R(A) := K(B) % RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_POW:
+    case opcode::HKS_OPCODE_POW:                    // A B C   R(A) := R(B) ^ RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_POW_BK:
+    case opcode::HKS_OPCODE_POW_BK:                 // A B C   R(A) := K(B) ^ RK(C)
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_NEWTABLE:
+    case opcode::HKS_OPCODE_NEWTABLE:               // A B C   R(A) := array=B hash=C
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("ARRAY(%d), ", inst->B);
+        inst->data += utils::string::va("HASH(%d)", inst->C);
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_UNM:
+    case opcode::HKS_OPCODE_UNM:                    // A B     R(A) := -R(B)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_NOT:
+    case opcode::HKS_OPCODE_NOT:                    // A B     R(A) := not R(B)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_LEN:
+    case opcode::HKS_OPCODE_LEN:                    // A B     R(A) := length of R(B)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_LT:
+    case opcode::HKS_OPCODE_LT:                     // A B C   if ((RK(B) < RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_LT_BK:
+    case opcode::HKS_OPCODE_LT_BK:                  // A B C   if ((RK(B) < RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_LE:
+    case opcode::HKS_OPCODE_LE:                     //  A B C if ((RK(B) <= RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        if (inst->C < 0 || inst->sZero) inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_LE_BK:
+    case opcode::HKS_OPCODE_LE_BK:                  //  A B C if ((RK(B) <= RK(C)) ~= A) then PC++
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->B).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_CONCAT:
+    case opcode::HKS_OPCODE_CONCAT:                 // A B C   R(A) := R(B).. ... ..R(C)
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("R(%d .. %d)", inst->B, inst->C);
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_TESTSET:                // A B C   if (R(B) <=> C) then R(A) := R(B) else pc++
-        inst->mode = lui::instruction_mode::AsBx;   //         RK(B) ?
+        inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_FORPREP:
@@ -474,14 +702,18 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         break;
     case opcode::HKS_OPCODE_SETLIST:                // A B C   R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
         inst->mode = lui::instruction_mode::ABC;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("R(%d .. %d)", inst->C, inst->B); // regs(C, B), for B < 50
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_CLOSE:                  // A       close all variables in the stack up to (>=) R(A)
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_CLOSURE:                // A Bx    R(A)
+    case opcode::HKS_OPCODE_CLOSURE:                // A Bx    R(A) := closure(KPROTO[Bx], R(A), ... ,R(A+n))
         inst->mode = lui::instruction_mode::ABx;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += utils::string::va("SUB_FUNC(%d)", inst->Bx);
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_VARARG:                 // A B     R(A), R(A+1), ..., R(A+B-1) = vararg
@@ -500,23 +732,36 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_TEST_R1:                // same as TEST ????
-        inst->mode = lui::instruction_mode::ABC;    //         c != 0, !R(A)
-        inst->data = find_constant(func, inst->C).value;  //   c == 0,  R(A)
-        print_instruction(inst);  // have a consts in B or C?
+    case opcode::HKS_OPCODE_TEST_R1:                // A C     if not (R(A) <=> K(C)) then pc++
+        inst->mode = lui::instruction_mode::ABC;    //         c != 0, !R(A) c == 0,  R(A)
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->C));
+        print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_NOT_R1:
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_GETFIELD_R1:            // A B C   R(A) = R(B)[K(C)]
+    case opcode::HKS_OPCODE_GETFIELD_R1:            // A B C   R(A) = R(B)[K(C)] ?
         inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->C).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += std::string(find_constant(func, inst->C));
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_SETFIELD_R1:
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data = find_constant(func, inst->C).value;
+// NEED REVISION
+    case opcode::HKS_OPCODE_SETFIELD_R1:            // A B C   R(A)[K(C)] = R(A)  ?
+        inst->mode = lui::instruction_mode::ABC;    // C seems like not a K
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->B));
+        if (inst->C < 0 || inst->sZero)
+        {
+            inst->data += ", " + std::string(find_constant(func, inst->C));
+        }
+        else
+        {
+            inst->data += ", " + std::string(lui::reg(inst->C));
+        }
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_NEWSTRUCT:
@@ -524,8 +769,8 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_DATA:
-        inst->mode = lui::instruction_mode::ABx;
-        print_instruction(inst);
+        //inst->mode = lui::instruction_mode::ABx;
+        //print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_SETSLOTN:
         inst->mode = lui::instruction_mode::ABC;
@@ -583,9 +828,10 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
         inst->mode = lui::instruction_mode::ABC;
         print_instruction(inst);
         break;
-    case opcode::HKS_OPCODE_GETGLOBAL_MEM:
+    case opcode::HKS_OPCODE_GETGLOBAL_MEM:          // A Bx    R(A) := Gbl[Kst(Bx)]
         inst->mode = lui::instruction_mode::ABx;
-        inst->data = find_constant(func, inst->Bx).value;
+        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += std::string(find_constant(func, inst->Bx));
         print_instruction(inst);
         break;
     case opcode::HKS_OPCODE_DELETE:
@@ -629,7 +875,7 @@ void disassembler::print_instruction(const lui::instruction_ptr& inst)
     }
     else
     {
-        DISASSEMBLER_ERROR("INSTRUCTION MODE UNSET");
+        //DISASSEMBLER_ERROR("INSTRUCTION MODE UNSET");
     }
 }
 

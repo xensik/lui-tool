@@ -9,15 +9,7 @@
 namespace lui
 {
 
-enum class instruction_mode
-{
-    unset,
-    ABC,
-    ABx,
-    AsBx,
-};
-
-enum class object_type
+enum class data_type
 {
     TNIL,
     TBOOLEAN,
@@ -32,22 +24,50 @@ enum class object_type
     TCFUNCTION,
     TUI64,
     TSTRUCT,
+    TUNDEFINED // custom
+};
+
+enum class instruction_mode
+{
+    unset,
+    ABC,
+    ABx,
+    AsBx,
+};
+
+struct reg
+{
+    std::uint32_t   index;
+    data_type       type;
+    std::string     value;
+
+    reg(std::uint32_t index): index(index), type(data_type::TUNDEFINED) {}
+
+    operator std::string()
+    {
+        return utils::string::va("R(%02d)", index);
+    }
 };
 
 struct constant
 {
-    object_type type;
-    std::string value;
+    data_type       type;
+    std::string     value;
 
-    constant(object_type type, const std::string& value): type(type), value(value) {}
+    constant(data_type type, const std::string& value): type(type), value(value) {}
+
+    operator std::string()
+    {
+        return "K(" + value + ")";
+    }
 };
 
-struct typeinfo
+struct type_info
 {
     std::uint32_t id;
     std::string name;
 
-    typeinfo(std::uint32_t id, const std::string& name) : id(id), name(name) {}
+    type_info(std::uint32_t id, const std::string& name) : id(id), name(name) {}
 };
 
 struct instruction
@@ -72,17 +92,26 @@ struct instruction
 
 struct function
 {
+    // String source_name               -- IW engine stripped
+    // Integer line_defined             -- IW engine stripped
+    // Integer last_line_defined        -- IW engine stripped
     std::uint32_t upval_count;
     std::uint32_t param_count;
-    std::uint8_t  flags;
-    std::uint32_t register_count;
+    std::uint8_t  vararg_flags;         // 1=VARARG_HASARG, 2=VARARG_ISVARARG, 4=VARARG_NEEDSARG
+    std::uint32_t register_count;       // -- maximum stack size
+    // List instructions
     std::uint64_t instruction_count;
     std::vector<std::unique_ptr<instruction>> instructions;
+    // List constants
     std::uint32_t constant_count;
     std::vector<std::unique_ptr<constant>> constants;
+
     std::uint32_t debug;
     std::uint32_t sub_func_count;
     std::vector<std::unique_ptr<function>> sub_funcs;
+    // List src line position list      -- IW engine stripped
+    // List local var list              -- IW engine stripped
+    // List upvalue list                -- IW engine stripped
 };
 
 struct header
@@ -99,7 +128,7 @@ struct header
     std::uint8_t build_flags;           // 0x03
     std::uint8_t referenced_mode;       // 0x01
     std::uint32_t type_count;           // 13
-    std::vector<typeinfo> types;
+    std::vector<type_info> types;
 };
 
 struct file
