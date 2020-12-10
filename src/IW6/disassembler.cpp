@@ -82,9 +82,9 @@ void disassembler::disassemble_function(const lui::function_ptr& func)
 {
     auto fun_index =  buffer_->pos();
 
-    func->upval_count = buffer_->read<std::uint32_t>();
+    func->upval_count = buffer_->read<std::uint32_t>(); // always 0
     func->param_count = buffer_->read<std::uint32_t>();
-    func->flags = buffer_->read<std::uint8_t>();
+    func->flags = buffer_->read<std::uint8_t>();        // only main func = 2
     func->register_count = buffer_->read<std::uint32_t>();
     func->instruction_count = buffer_->read<std::uint64_t>();
 
@@ -107,7 +107,8 @@ void disassembler::disassemble_function(const lui::function_ptr& func)
     func->debug = buffer_->read<std::uint32_t>();
     func->sub_func_count = buffer_->read<std::uint32_t>();
 
-    output_->write_string(utils::string::va("\n%ssub_%X [instructions: %d, constants: %d]\n", indented(tabsize_).data(), fun_index, func->instruction_count, func->constant_count));
+    auto info = utils::string::va("params: %d, registers: %d, instructions: %d, constants: %d", func->param_count, func->register_count, func->instruction_count, func->constant_count);
+    output_->write_string(utils::string::va("\n%ssub_%X [%s]\n", indented(tabsize_).data(), fun_index, info.data()));
     tabsize_ += 4;
     for (int i = 0; i < func->instruction_count; i++)
     {
