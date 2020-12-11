@@ -148,3 +148,6 @@ user*.bat
 
 # VScode
 .vscode/
+
+# Output
+*.luasm
