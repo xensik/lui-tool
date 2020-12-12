@@ -9,56 +9,56 @@
 namespace lui
 {
 
-enum class data_type
+struct data
 {
-    TNIL,
-    TBOOLEAN,
-    TLIGHTUSERDATA,
-    TNUMBER,
-    TSTRING,
-    TTABLE,
-    TFUNCTION,
-    TUSERDATA,
-    TTHREAD,
-    TIFUNCTION,
-    TCFUNCTION,
-    TUI64,
-    TSTRUCT,
-    TUNDEFINED // custom
+enum class t
+{
+    NIL, BOOLEAN, LIGHTUSERDATA, NUMBER, STRING, TABLE, FUNCTION,
+    USERDATA, THREAD, IFUNCTION, CFUNCTION, UI64, STRUCT,
+};
+    t type_;
+    std::string value_;
+
+    data(t type, const std::string& value): type_(type), value_(value) {}
+
+    auto type() -> t
+    {
+        return type_;
+    }
+
+    auto value() -> std::string
+    {
+        return value_;
+    }
+
+    void to_literal()
+    {
+        value_ = "\""s += value_ += "\"";
+    }
 };
 
-enum class instruction_mode
+struct kst
 {
-    unset,
-    ABC,
-    ABx,
-    AsBx,
+    data data_;
+
+    kst(data::t type, const std::string& value): data_(data(type, value)) {}
+
+    auto print() -> std::string
+    {
+        return "KST(" + data_.value_ + ")";
+    }
 };
 
 struct reg
 {
-    std::uint32_t   index;
-    data_type       type;
-    std::string     value;
+    std::uint32_t   index_;
+    data            data_;
 
-    reg(std::uint32_t index): index(index), type(data_type::TUNDEFINED) {}
+    reg(std::uint32_t index): index_(index), data_(lui::data(data::t::NIL, "nil")) {}
 
-    operator std::string()
+    auto print() -> std::string
     {
-        return utils::string::va("R(%02d)", index);
-    }
-};
-
-struct constant
-{
-    data_type       type;
-    std::string     value;
-
-    constant(data_type type, const std::string& value): type(type), value(value) {}
-
-    operator std::string()
-    {
-        return "K(" + value + ")";
+        return utils::string::va("REG(%02X)", index_);
     }
 };
 
@@ -75,7 +75,7 @@ struct instruction
     std::uint32_t index;
     std::uint32_t value;
     std::string data;
-    instruction_mode mode;
+
     std::uint8_t OP;
     std::uint32_t A;
     std::uint32_t B;
@@ -87,7 +87,7 @@ struct instruction
     instruction(std::uint32_t index, std::uint32_t value, std::uint8_t OP, std::uint32_t A,
         std::uint32_t B, std::uint32_t C, std::uint32_t Bx, std::int32_t sBx, bool sZero)
         : index(index),value(value), OP(OP), A(A), B(B), C(C), Bx(Bx), sBx(sBx), 
-            sZero(sZero), mode(instruction_mode::unset) {}
+            sZero(sZero) {}
 };
 
 struct function
@@ -104,7 +104,7 @@ struct function
     std::vector<std::unique_ptr<instruction>> instructions;
     // List constants
     std::uint32_t constant_count;
-    std::vector<std::unique_ptr<constant>> constants;
+    std::vector<kst> constants;
 
     std::uint32_t debug;
     std::uint32_t sub_func_count;
@@ -112,6 +112,8 @@ struct function
     // List src line position list      -- IW engine stripped
     // List local var list              -- IW engine stripped
     // List upvalue list                -- IW engine stripped
+
+    std::string name;
 };
 
 struct header
@@ -137,7 +139,7 @@ struct file
     std::unique_ptr<function> main;
 };
 
-using constant_ptr = std::unique_ptr<constant>;
+using kst_ptr = std::unique_ptr<kst>;
 using header_ptr = std::unique_ptr<header>;
 using instruction_ptr = std::unique_ptr<instruction>;
 using function_ptr = std::unique_ptr<function>;

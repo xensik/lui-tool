@@ -25,10 +25,10 @@ public:
     void disassemble_function(const lui::function_ptr& func);
     void disassemble_instruction(const lui::function_ptr& func);
     void disassemble_constant(const lui::function_ptr& func);
-    void disassemble_opcode(const lui::function_ptr& func, const lui::instruction_ptr& inst);
-    auto find_constant(const lui::function_ptr& func, std::int32_t index) -> lui::constant;
-
-    void print_instruction(const lui::instruction_ptr& inst);
+    auto find_constant(const lui::function_ptr& func, std::int32_t index) -> lui::kst&;
+    void print_function(const lui::function_ptr& func);
+    void print_instruction(const lui::function_ptr& func, const lui::instruction_ptr& inst);
+    void print_instruction_data(const lui::instruction_ptr& inst); 
 };
 
 } // namespace IW6

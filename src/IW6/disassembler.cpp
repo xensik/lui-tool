@@ -19,6 +19,8 @@ std::string indented(std::uint32_t indent)
 
 auto disassembler::output() -> std::vector<std::uint8_t>
 {
+    print_function(file_->main);
+
     std::vector<std::uint8_t> output;
 
     output.resize(output_->pos());
@@ -35,6 +37,7 @@ void disassembler::disassemble(std::vector<std::uint8_t>& data)
 
     this->disassemble_header();
     this->disassemble_functions();
+    this->disassemble_prototype();
 }
 
 void disassembler::disassemble_header()
@@ -66,7 +69,6 @@ void disassembler::disassemble_functions()
 {
     file_->main = std::make_unique<lui::function>();
     this->disassemble_function(file_->main);
-    this->disassemble_prototype();
 }
 
 void disassembler::disassemble_prototype()
@@ -78,9 +80,9 @@ void disassembler::disassemble_prototype()
 
 void disassembler::disassemble_function(const lui::function_ptr& func)
 {
-    auto fun_index =  buffer_->pos();
+    func->name = utils::string::va("%X", buffer_->pos());
 
-    func->upval_count = buffer_->read<std::uint32_t>(); // always 0
+    func->upval_count = buffer_->read<std::uint32_t>();
     func->param_count = buffer_->read<std::uint32_t>();
     func->vararg_flags = buffer_->read<std::uint8_t>();
     func->register_count = buffer_->read<std::uint32_t>();
@@ -105,23 +107,11 @@ void disassembler::disassemble_function(const lui::function_ptr& func)
     func->debug = buffer_->read<std::uint32_t>();
     func->sub_func_count = buffer_->read<std::uint32_t>();
 
-    auto info = utils::string::va("flag: %d, params: %d, upvals: %d, registers: %d, instructions: %d, constants: %d", func->vararg_flags, func->param_count, func->upval_count, func->register_count, func->instruction_count, func->constant_count);
-    output_->write_string(utils::string::va("\n%ssub_%X [%s]\n", indented(tabsize_).data(), fun_index, info.data()));
-    tabsize_ += 4;
-    for (int i = 0; i < func->instruction_count; i++)
-    {
-        this->disassemble_opcode(func, func->instructions.at(i));
-    }
-    
-    // go to subfunctions
     for (int i = 0; i < func->sub_func_count; i++)
     {
         func->sub_funcs.push_back(std::make_unique<lui::function>());
         this->disassemble_function(func->sub_funcs.back());
     }
-
-    tabsize_ -= 4;
-    output_->write_string(utils::string::va("%send_%X\n", indented(tabsize_).data(), fun_index));
 }
 
 void disassembler::disassemble_instruction(const lui::function_ptr& func)
@@ -144,449 +134,430 @@ void disassembler::disassemble_instruction(const lui::function_ptr& func)
 
 void disassembler::disassemble_constant(const lui::function_ptr& func)
 {
-    std::string data;
-    auto type = lui::data_type(buffer_->read<std::uint8_t>());
+    std::string value;
+    auto type = lui::data::t(buffer_->read<std::uint8_t>());
 
     switch(type)
     {
-        case lui::data_type::TNIL:
-            data = "nil";
+        case lui::data::t::NIL:
+            value = "nil";
         break;
-        case lui::data_type::TBOOLEAN:
-            data = ((bool)buffer_->read<std::uint8_t>()) ? "true" : "false";
+        case lui::data::t::BOOLEAN:
+            value = ((bool)buffer_->read<std::uint8_t>()) ? "true" : "false";
         break;
-        case lui::data_type::TLIGHTUSERDATA:
-            data = utils::string::va("%lld", buffer_->read<std::uint64_t>());
+        case lui::data::t::LIGHTUSERDATA:
+            value = utils::string::va("%lld", buffer_->read<std::uint64_t>());
         break;
-        case lui::data_type::TNUMBER:
-            data = utils::string::va("%g", buffer_->read<float>());
+        case lui::data::t::NUMBER:
+            value = utils::string::va("%g", buffer_->read<float>());
         break;
-        case lui::data_type::TSTRING:
+        case lui::data::t::STRING:
             buffer_->read<std::uint64_t>();
-            data = "\"" + buffer_->read_string() + "\"";
+            value = buffer_->read_string();
         break;
         default:
             DISASSEMBLER_ERROR("UNKNOWN CONSTANT TYPE");
         break;
     }
 
-    func->constants.push_back(std::make_unique<lui::constant>(type, data));
+    func->constants.push_back(lui::kst(type, value));
 }
 
-void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::instruction_ptr& inst)
+auto disassembler::find_constant(const lui::function_ptr& func, std::int32_t index) -> lui::kst&
+{
+    if (index < 0) index = -index;
+
+    return func->constants.at(index);
+}
+
+void disassembler::print_function(const lui::function_ptr& func)
+{
+    auto info = utils::string::va("flag: %d, params: %d, upvals: %d, registers: %d, instructions: %d, constants: %d", func->vararg_flags, func->param_count, func->upval_count, func->register_count, func->instruction_count, func->constant_count);
+    output_->write_string(utils::string::va("\n%ssub_%s [%s]\n", indented(tabsize_).data(), func->name.data(), info.data()));
+    tabsize_ += 4;
+
+    for (int i = 0; i < func->instruction_count; i++)
+    {
+        this->print_instruction(func, func->instructions.at(i));
+    }
+
+    // go to subfunctions
+    for (int i = 0; i < func->sub_func_count; i++)
+    {
+        this->print_function(func->sub_funcs.at(i));
+    }
+
+    tabsize_ -= 4;
+    output_->write_string(utils::string::va("%send_%s\n", indented(tabsize_).data(), func->name.data()));
+}
+void disassembler::print_instruction(const lui::function_ptr& func, const lui::instruction_ptr& inst)
 {
     auto op = opcode(inst->OP);
 
-#define RK(f, c, z) (c < 0 || z) ? std::string(find_constant(f, c)) : std::string(lui::reg(c));
+#define RK(f, c, z) (c < 0 || z) ? std::string(find_constant(f, c).print()) : std::string(lui::reg(c).print());
                                                     // -------------------------------------
     switch(op)                                      // args    description
     {                                               // -------------------------------------
     case opcode::HKS_OPCODE_GETFIELD:               // A B C   R(A) := R(B)[K(C)]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
-        inst->data += std::string(find_constant(func, inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
+        inst->data += find_constant(func, inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TEST:                   // A C     if not (R(A) <=> C) then pc++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
         inst->data += utils::string::va("BOOL(%d)", inst->C); // && use 0, || use 1
-        print_instruction(inst);                   
+        print_instruction_data(inst);                   
         break;
     case opcode::HKS_OPCODE_CALL_I:                 // A B C   ?
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B) + ", "; // last_arg + 1
-        inst->data += utils::string::va("RET(%d)", inst->C); // last_ret + 1
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B) += ", "; // last_arg + 1
+        inst->data += utils::string::va("RET(%02X)", inst->C); // last_ret + 1
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_EQ:                     // A B C   if ((R(B) == RK(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_EQ_BK:                  // A B C   if ((K(B) == R(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
-        inst->data += std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_GETGLOBAL:              // A Bx    R(A) := Gbl[Kst(Bx)] 
-        inst->mode = lui::instruction_mode::ABx;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->Bx));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->Bx).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_MOVE:                   // A B     R(A) := R(B)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SELF:                   // A B C   R(A+1) := R(B); R(A) := R(B)[RK(C)]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_RETURN:                 // A B    return R(A), ... ,R(A+B-2)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // if B == 1, no rets. B == 0, R(A) to stack top
-        inst->data += utils::string::va("OPT(%d)", inst->B); // if B >= 2,  (B-1) returns
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", "; // if B == 1, no rets. B == 0, R(A) to stack top
+        inst->data += utils::string::va("OPT(%02X)", inst->B); // if B >= 2,  (B-1) returns
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_GETTABLE_S:             // A B C   R(A) := R(B)[RK(C)]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_GETTABLE:               // A B C   R(A) := R(B)[RK(C)]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LOADBOOL:               // A B C   R(A) := (Bool)B; if (C) pc++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("BOOL(%d)", inst->B) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("BOOL(%d)", inst->B) += ", ";
         inst->data += utils::string::va("BOOL(%d)", inst->C);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
-    case opcode::HKS_OPCODE_TFORLOOP:               //
-        inst->mode = lui::instruction_mode::ABC;
-        print_instruction(inst);
+    case opcode::HKS_OPCODE_TFORLOOP:               // A C    3 internal vars, and user vars in R(A+3) to C
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("NUM(%02X)", inst->C);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETFIELD:               // A B C   R(A)[K(B)] := RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETTABLE_S:             // A B C   R(A)[R(B)] := RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETTABLE_S_BK:          // A B C   R(A)[K(B)] := RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETTABLE:               // A B C   R(A)[R(B)] := RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETTABLE_BK:            // A B C   R(A)[K(B)] := RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TAILCALL_I:             // A B C   return R(A)(R(A+1), ... ,R(A+B-1))
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B); // last_arg + 1
-        print_instruction(inst);                             // C always 0
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B); // last_arg + 1
+        print_instruction_data(inst);                             // C always 0
         break;
     case opcode::HKS_OPCODE_LOADK:                  // A Bx    R(A) := Kst(Bx)
-        inst->mode = lui::instruction_mode::ABx;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->Bx));print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        {
+            auto kst = find_constant(func, inst->Bx);
+            if(kst.data_.type_ == lui::data::t::STRING)
+                kst.data_.to_literal();
+            inst->data += kst.print();
+        }
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LOADNIL:                // A B     R(A) := ... := R(B) := nil
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += utils::string::va("R(%d .. %d)", inst->A, inst->B);
-        print_instruction(inst);
+        inst->data += utils::string::va("R(%02X .. %02X)", inst->A, inst->B);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETGLOBAL:              // A Bx    Gbl[Kst(Bx)] := R(A)
-        inst->mode = lui::instruction_mode::ABx;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->Bx));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->Bx).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_JMP:                    // sBx      pc += sBx
-        inst->mode = lui::instruction_mode::AsBx;
         inst->data += utils::string::va("PC(%d)", inst->sBx);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_CALL:                   // A B C   ?
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B) + ", "; // last_arg + 1
-        inst->data += utils::string::va("RET(%d)", inst->C) + ", "; // last_ret + 1
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B) += ", "; // last_arg + 1
+        inst->data += utils::string::va("RET(%02X)", inst->C); // last_ret + 1
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TAILCALL:               // A B C   return R(A)(R(A+1), ... ,R(A+B-1))
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B); // last_arg + 1
-        print_instruction(inst);                             // C always 0
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B); // last_arg + 1
+        print_instruction_data(inst);                             // C always 0
         break;
     case opcode::HKS_OPCODE_GETUPVAL:               // A B      R(A) := UpValue[B]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("UPVAL(%d)",inst->B);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("UPVAL(%02X)", inst->B);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETUPVAL:               // A B      UpValue[B] := R(A)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("UPVAL(%d)",inst->B);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("UPVAL(%02X)", inst->B);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_ADD:                    // A B C   R(A) := R(B) + RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_ADD_BK:                 // A B C   R(A) := K(B) + R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SUB:                    //  A B C   R(A) := R(B) – RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SUB_BK:                 //  A B C   R(A) := K(B) – R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_MUL:                    //  A B C   R(A) := R(B) * RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_MUL_BK:                 //  A B C   R(A) := K(B) * R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_DIV:                    // A B C   R(A) := R(B) / RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_DIV_BK:                 // A B C   R(A) := K(B) / R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_MOD:                    // A B C   R(A) := R(B) % RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_MOD_BK:                 // A B C   R(A) := K(B) % R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_POW:                    // A B C   R(A) := R(B) ^ RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_POW_BK:                 // A B C   R(A) := K(B) ^ R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
-        inst->data += ", " + std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_NEWTABLE:               // A B C   R(A) := array=B hash=C
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("ARRAY(%d), ", inst->B);
-        inst->data += utils::string::va("HASH(%d)", inst->C);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("IDX(%02X), ", inst->B);
+        inst->data += utils::string::va("HASH(%02X)", inst->C);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_UNM:                    // A B     R(A) := -R(B)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_NOT:                    // A B     R(A) := not R(B)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LEN:                    // A B     R(A) := length of R(B)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LT:                     // A B C   if ((R(B) < RK(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LT_BK:                  // A B C   if ((K(B) < R(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
-        inst->data += std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LE:                     //  A B C if ((R(B) <= RK(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_LE_BK:                  //  A B C if ((K(B) <= R(C)) ~= A) then PC++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B)) + ", ";
-        inst->data += std::string(lui::reg(inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
+        inst->data += lui::reg(inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_CONCAT:                 // A B C   R(A) := R(B).. ... ..R(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("R(%d .. %d)", inst->B, inst->C);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("R(%02X .. %02X)", inst->B, inst->C);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TESTSET:                // A B C   if (R(B) <=> C) then R(A) := R(B) else pc++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
         inst->data += utils::string::va("BOOL(%d)", inst->C); // && use 0, || use 1
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
-    case opcode::HKS_OPCODE_FORPREP:
-        inst->mode = lui::instruction_mode::AsBx;
-        print_instruction(inst);
+    case opcode::HKS_OPCODE_FORPREP:                // A sBx   R(A) -= R(A+2); PC += sBx
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("PC(%d)", inst->sBx);
+        print_instruction_data(inst);
         break;
-    case opcode::HKS_OPCODE_FORLOOP:
-        inst->mode = lui::instruction_mode::AsBx;
-        print_instruction(inst);
+    case opcode::HKS_OPCODE_FORLOOP:                // A sBx   R(A) += R(A+2) if R(A) <?= R(A+1) then { PC += sBx; R(A+3) = R(A) }
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("PC(%d)", inst->sBx);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETLIST:                // A B C   R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("R(%d .. %d)", inst->C, inst->B); // regs(C, B), for B < 50
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("R(%02X .. %02X)", inst->C, inst->B); // regs(C, B), for B < 50
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_CLOSE:                  // A       close all variables in the stack up to (>=) R(A)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_CLOSURE:                // A Bx    R(A) := closure(KPROTO[Bx], R(A), ... ,R(A+n))
-        inst->mode = lui::instruction_mode::ABx;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("SUB_FUNC(%d)", inst->Bx);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("FUN(%02X)", inst->Bx);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_VARARG:                 // A B     R(A), R(A+1), ..., R(A+B-1) = vararg
-        inst->mode = lui::instruction_mode::ABC;
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("NUM(%02X)", inst->B);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TAILCALL_I_R1:          // A B C   return R(A)(R(A+1), ... ,R(A+B-1))
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B); // last_arg + 1
-        print_instruction(inst);                             // C always 0
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B); // last_arg + 1
+        print_instruction_data(inst);                             // C always 0
         break;
     case opcode::HKS_OPCODE_CALL_I_R1:              // A B C   ?
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", "; // call pointer
-        inst->data += utils::string::va("ARG(%d)", inst->B) + ", "; // last_arg + 1
-        inst->data += utils::string::va("RET(%d)", inst->C); // last_ret + 1
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", "; // call pointer
+        inst->data += utils::string::va("ARG(%02X)", inst->B) + ", "; // last_arg + 1
+        inst->data += utils::string::va("RET(%02X)", inst->C); // last_ret + 1
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETUPVAL_R1:            // A B      UpValue[B] := R(A)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += utils::string::va("UPVAL(%d)",inst->B);
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += utils::string::va("UPVAL(%02X)",inst->B);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_TEST_R1:                // A C     if not (R(A) <=> C) then pc++
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
+        inst->data += lui::reg(inst->A).print() += ", ";
         inst->data += utils::string::va("BOOL(%d)", inst->C); // && use 0, || use 1
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_NOT_R1:                 // A B     R(A) := not R(B)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_GETFIELD_R1:            // A B C   R(A) = R(B)[K(C)]
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(lui::reg(inst->B)) + ", ";
-        inst->data += std::string(find_constant(func, inst->C));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += lui::reg(inst->B).print() += ", ";
+        inst->data += find_constant(func, inst->C).print();
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_SETFIELD_R1:            // A B C   R(A)[K(B)] = RK(C)
-        inst->mode = lui::instruction_mode::ABC;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->B));
+        inst->data += lui::reg(inst->A).print() += ", ";
+        inst->data += find_constant(func, inst->B).print() += ", ";
         inst->data += RK(func, inst->C, inst->sZero);
-        print_instruction(inst);
+        print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_DATA:                   // A Bx    ????
 // This not exits in vm executer!!! is parsed before??
 // if A == 00, Bx is 0 
 // if A == 20, Bx is a constant(nil)
 //      inst->mode = lui::instruction_mode::ABx;
+//      inst->data += utils::string::va("OPT(%02X)", inst->A) + ", ";
+//      inst->data += (inst->A == 20) ? find_constant(func, inst->Bx).print() : utils::string::va("UNK(%02X)", inst->B);
+//      print_instruction_data(inst);
         break;
     case opcode::HKS_OPCODE_GETGLOBAL_MEM:          // A Bx    R(A) := Gbl[Kst(Bx)]
-        inst->mode = lui::instruction_mode::ABx;
-        inst->data += std::string(lui::reg(inst->A)) + ", ";
-        inst->data += std::string(find_constant(func, inst->Bx));
-        print_instruction(inst);
+        inst->data += lui::reg(inst->A).print() + ", ";
+        inst->data += find_constant(func, inst->Bx).print();
+        print_instruction_data(inst);
         break;
         default:
             DISASSEMBLER_ERROR("Unhandled opcode %s", resolver::opcode_name(opcode(inst->OP)).data());
@@ -594,34 +565,9 @@ void disassembler::disassemble_opcode(const lui::function_ptr& func, const lui::
     }
 }
 
-auto disassembler::find_constant(const lui::function_ptr& func, std::int32_t index) -> lui::constant
+void disassembler::print_instruction_data(const lui::instruction_ptr& inst)
 {
-    if (index < 0) index = -index;
-
-    auto result = *func->constants.at(index);
-
-    return result;
-}
-
-void disassembler::print_instruction(const lui::instruction_ptr& inst)
-{
-    if(inst->mode == lui::instruction_mode::ABC)   
-    {
-        output_->write_string(utils::string::va("%s%-14s %02X %02X %02X ; %s\n", indented(tabsize_).data(), resolver::opcode_name(opcode(inst->OP)).data(), inst->A, inst->B, inst->C, inst->data.data()));   
-    }
-    else if(inst->mode == lui::instruction_mode::ABx)
-    {
-        output_->write_string(utils::string::va("%s%-14s %02X %02X    ; %s\n", indented(tabsize_).data(), resolver::opcode_name(opcode(inst->OP)).data(), inst->A, inst->Bx, inst->data.data()));   
-    }
-    else if(inst->mode == lui::instruction_mode::AsBx)
-    {
-        output_->write_string(utils::string::va("%s%-14s %02X %02X    ; %s\n", indented(tabsize_).data(), resolver::opcode_name(opcode(inst->OP)).data(), inst->A, inst->sBx, inst->data.data()));   
-    
-    }
-    else
-    {
-        //DISASSEMBLER_ERROR("INSTRUCTION MODE UNSET");
-    }
+    output_->write_string(utils::string::va("%s%-14s %s\n", indented(tabsize_).data(), resolver::opcode_name(opcode(inst->OP)).data(), inst->data.data()));
 }
 
 } // namespace IW6

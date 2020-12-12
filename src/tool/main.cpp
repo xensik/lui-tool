@@ -31,8 +31,51 @@ auto overwrite_prompt(const std::string& file) -> bool
     return overwrite;
 }
 
+using namespace std::filesystem;
+
+void disassemble_dir(lui::disassembler& disassembler, const std::filesystem::path& dir_path)
+{
+    if (!std::filesystem::exists(dir_path)) 
+        return;
+
+    for (const directory_entry& entry : recursive_directory_iterator(dir_path))
+    {
+        auto path = entry.path();
+
+        if (is_directory(entry.status()) && std::string(path).find(".DS_Store") != std::string::npos)
+        {
+            //recurse_dir(disassembler, entry.path());
+            continue;
+        }
+        else if(entry.is_regular_file() && std::string(path).find(".luac") != std::string::npos)
+        {
+
+            auto file = std::string(path);
+            const auto ext = std::string(".luac");
+            const auto extpos = file.find(ext);
+            
+            if (extpos != std::string::npos)
+            {
+                file.replace(extpos, ext.length(), "");
+            }
+
+            auto data = utils::file::read(file + ".luac");
+
+            disassembler.disassemble(data);
+            LOG_INFO("%s disasembled.", file.data());
+           // utils::file::save(file + ".luasm", disassembler.output());
+        }
+    }
+}
+
 void disassemble_file(lui::disassembler& disassembler, std::string file)
 {
+    if(std::filesystem::is_directory(file))
+    {
+        disassemble_dir(disassembler, file);
+        return;
+    }
+
     const auto ext = std::string(".luac");
     const auto extpos = file.find(ext);
     
