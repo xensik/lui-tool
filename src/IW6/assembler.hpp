@@ -9,6 +9,14 @@
 namespace IW6
 {
 
+class assembler : public lui::assembler
+{
+public:
+    auto output() -> std::vector<std::uint8_t>;
+    void assemble(std::vector<std::uint8_t>& data);
+    void assemble(lui::file_ptr data);
+};
+
 } // namespace IW6
 
 #endif // _LUI_IW6_ASSEMBLER_HPP_

@@ -12,6 +12,7 @@
 enum class mode
 {
     __,
+    ASM,
     DISASM,
     DECOMP,
 };

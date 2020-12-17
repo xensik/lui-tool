@@ -13,12 +13,13 @@ class decompiler : public lui::decompiler
 {
     lui::file_ptr file_;
     lui::script_ptr script_;
-
     std::int32_t var_index;
 
 public:
     auto output() -> std::vector<std::uint8_t>;
     void decompile(lui::file_ptr file);
+
+private:
     void decompile_function(lui::function& func);
     void decompile_instruction(lui::function& func,  std::uint32_t& index);
     auto decompile_call(lui::function& func, const lui::instruction_ptr& inst) -> lui::child;

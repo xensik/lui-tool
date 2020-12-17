@@ -20,6 +20,8 @@ public:
     auto output() -> std::vector<std::uint8_t>;
     auto output_d() -> lui::file_ptr;
     void disassemble(std::vector<std::uint8_t>& data);
+
+private:
     void disassemble_header();
     void disassemble_functions();
     void disassemble_prototype();

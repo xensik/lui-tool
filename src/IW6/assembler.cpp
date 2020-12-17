@@ -8,4 +8,20 @@
 namespace IW6
 {
 
+auto assembler::output() -> std::vector<std::uint8_t>
+{
+    std::vector<std::uint8_t> output;
+    return output;
+}
+
+void assembler::assemble(std::vector<std::uint8_t>& data)
+{
+
+}
+
+void assembler::assemble(lui::file_ptr data)
+{
+
+}
+
 } // namespace IW6

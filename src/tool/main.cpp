@@ -31,6 +31,23 @@ auto overwrite_prompt(const std::string& file) -> bool
     return overwrite;
 }
 
+void assemble_file(lui::assembler& assembler, std::string file)
+{
+    const auto ext = std::string(".luasm");
+    const auto extpos = file.find(ext);
+    
+    if (extpos != std::string::npos)
+    {
+        file.replace(extpos, ext.length(), "");
+    }
+
+    auto data = utils::file::read(file + ".luasm");
+
+    assembler.assemble(data);
+    
+    utils::file::save(file + ".luac", assembler.output());
+}
+
 using namespace std::filesystem;
 
 void disassemble_dir(lui::disassembler& disassembler, const std::filesystem::path& dir_path)
@@ -134,7 +151,11 @@ int parse_flags(int argc, char** argv, game& game, mode& mode)
 
     arg = utils::string::to_lower(argv[2]);
 
-    if (arg == "-disasm")
+    if (arg == "-asm")
+    {
+        mode = mode::ASM;
+    }
+    else if (arg == "-disasm")
     {
         mode = mode::DISASM;
     }
@@ -165,7 +186,15 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == mode::DISASM)
+    if (mode == mode::ASM)
+    {
+        if (game == game::IW6)
+        {
+            IW6::assembler assembler;
+            assemble_file(assembler, file);
+        }
+    }
+    else if (mode == mode::DISASM)
     {
         if (game == game::IW6)
         {

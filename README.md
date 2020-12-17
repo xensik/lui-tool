@@ -5,7 +5,7 @@ A utility to assemble & disassemble IW engine UI scripts.
 ## Usage
 ``./lui-tool.exe <game> <mode> <file>``
 
-**game**:`-iw6`
+**game**: `-iw6`
 | Modes    |Description               | Output      |
 |:---------|:-------------------------|:------------|
 |`-asm`    |assemble a `file.luasm`   |`file.luac`  |
