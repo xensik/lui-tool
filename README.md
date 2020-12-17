@@ -1,5 +1,5 @@
 # LUI Tool
-A utility to assemble & disassemble IW engine game scripts.
+A utility to assemble & disassemble IW engine UI scripts.
 ## Supported Games
 - **IW6** (*Call of Duty: Ghosts*)
 ## Usage
