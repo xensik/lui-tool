@@ -13,6 +13,7 @@ class disassembler
 {
 public:
     virtual auto output() -> std::vector<std::uint8_t> = 0;
+    virtual auto output_d() -> lui::file_ptr = 0;
     virtual void disassemble(std::vector<std::uint8_t>& data) = 0;
 };
 

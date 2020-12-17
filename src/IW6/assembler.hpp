@@ -3,6 +3,12 @@
 // Use of this source code is governed by a GNU GPLv3 license
 // that can be found in the LICENSE file.
 
-#include "utils.hpp"
+#ifndef _LUI_IW6_ASSEMBLER_HPP_
+#define _LUI_IW6_ASSEMBLER_HPP_
 
-std::uint32_t lui::node::indent = 0;
+namespace IW6
+{
+
+} // namespace IW6
+
+#endif // _LUI_IW6_ASSEMBLER_HPP_

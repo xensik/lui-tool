@@ -90,11 +90,6 @@ void byte_buffer::write_c_string(const std::string& data)
     pos_ += data.size() + 1;
 }
 
-void byte_buffer::write_opaque_string(std::uint16_t id, const std::string& data)
-{
-    // TODO
-}
-
 auto byte_buffer::read_string() -> std::string
 {
     if(pos_ >= size_) { LOG_ERROR("buffer read overflow %lX", pos_); }

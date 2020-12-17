@@ -3,20 +3,19 @@
 // Use of this source code is governed by a GNU GPLv3 license
 // that can be found in the LICENSE file.
 
-#ifndef _LUI_ASSEMBLER_HPP_
-#define _LUI_ASSEMBLER_HPP_
+#ifndef _LUI_DECOMPILER_HPP_
+#define _LUI_DECOMPILER_HPP_
 
 namespace lui
 {
 
-class assembler
+class decompiler
 {
 public:
     virtual auto output() -> std::vector<std::uint8_t> = 0;
-    virtual void assemble(std::vector<std::uint8_t>& data) = 0;
-    virtual void assemble(lui::file_ptr data) = 0;
+    virtual void decompile(lui::file_ptr file) = 0;
 };
 
 } // namespace lui
 
-#endif // _LUI_ASSEMBLER_HPP_
+#endif // _LUI_DECOMPILER_HPP_

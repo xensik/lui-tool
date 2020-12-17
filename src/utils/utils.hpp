@@ -41,10 +41,12 @@ using namespace std::literals;
 #include "utility/byte_buffer.hpp"
 
 // LUI Types
+#include "types/nodetree.hpp"
 #include "types/assembly.hpp"
 
 // LUI Interfaces
 #include "interfaces/assembler.hpp"
 #include "interfaces/disassembler.hpp"
+#include "interfaces/decompiler.hpp"
 
 #endif // _LUI_UTILS_HPP_

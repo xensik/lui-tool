@@ -91,6 +91,31 @@ void disassemble_file(lui::disassembler& disassembler, std::string file)
     utils::file::save(file + ".luasm", disassembler.output());
 }
 
+void decompile_file(lui::disassembler& disassembler, lui::decompiler& decompiler, std::string file)
+{
+    if(std::filesystem::is_directory(file))
+    {
+        disassemble_dir(disassembler, file);
+        return;
+    }
+
+    const auto ext = std::string(".luac");
+    const auto extpos = file.find(ext);
+    
+    if (extpos != std::string::npos)
+    {
+        file.replace(extpos, ext.length(), "");
+    }
+
+    auto data = utils::file::read(file + ".luac");
+
+    disassembler.disassemble(data);
+
+    decompiler.decompile(disassembler.output_d());
+    
+    utils::file::save(file + ".lua", decompiler.output());
+}
+
 int parse_flags(int argc, char** argv, game& game, mode& mode)
 {
     if (argc != 4) return 1;
@@ -112,6 +137,10 @@ int parse_flags(int argc, char** argv, game& game, mode& mode)
     if (arg == "-disasm")
     {
         mode = mode::DISASM;
+    }
+    else if(arg == "-decomp")
+    {
+        mode = mode::DECOMP;
     }
     else
     {
@@ -142,6 +171,15 @@ int main(int argc, char** argv)
         {
             IW6::disassembler disassembler;
             disassemble_file(disassembler, file);
+        }
+    }
+    else if(mode == mode::DECOMP)
+    {
+        if (game == game::IW6)
+        {
+            IW6::disassembler disassembler;
+            IW6::decompiler decompiler;
+            decompile_file(disassembler, decompiler, file);
         }
     }
 

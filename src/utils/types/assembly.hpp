@@ -33,6 +33,14 @@ enum class t
 
     void to_literal()
     {
+        for(auto i = 0; i < value_.size(); i++)
+        {
+            if(value_.at(i) == '"')
+            {
+                value_.insert(value_.begin() + i, '\\');
+                i++;
+            }
+        }
         value_ = "\""s += value_ += "\"";
     }
 };
@@ -46,6 +54,36 @@ struct kst
     auto print() -> std::string
     {
         return "KST(" + data_.value_ + ")";
+    }
+
+    auto to_node() -> lui::node_ptr
+    {
+        switch(data_.type_)
+        {
+            case data::t::NIL:
+                return std::make_shared<lui::node_nil>();
+                break;
+            case data::t::BOOLEAN:
+                return std::make_shared<lui::node_boolean>((data_.value_ == "true") ? true : false);
+                break;
+            case data::t::NUMBER:
+                return std::make_shared<lui::node_number>(data_.value_);
+                break;
+            case data::t::STRING:
+                if(data_.value_.size() == 0)
+                {
+                    data_.to_literal();
+                    return std::make_shared<lui::node_string>(data_.value_);
+                }
+                if(data_.value_.at(0) == '\"')
+                    return std::make_shared<lui::node_string>(data_.value_);
+                else
+                    return std::make_shared<lui::node_identifier>(data_.value_);                
+                break;
+            default:
+                LOG_ERROR("constant node type not supported");
+                break;
+        }
     }
 };
 
@@ -92,9 +130,6 @@ struct instruction
 
 struct function
 {
-    // String source_name               -- IW engine stripped
-    // Integer line_defined             -- IW engine stripped
-    // Integer last_line_defined        -- IW engine stripped
     std::uint32_t upval_count;
     std::uint32_t param_count;
     std::uint8_t  vararg_flags;         // 1=VARARG_HASARG, 2=VARARG_ISVARARG, 4=VARARG_NEEDSARG
@@ -108,41 +143,40 @@ struct function
 
     std::uint32_t debug;
     std::uint32_t sub_func_count;
-    std::vector<std::unique_ptr<function>> sub_funcs;
-    // List src line position list      -- IW engine stripped
-    // List local var list              -- IW engine stripped
-    // List upvalue list                -- IW engine stripped
+    std::vector<function> sub_funcs;
 
+    // ----------------------------------------------------------    
     std::string name;
+    std::vector<std::string> params;
+    std::vector<lui::node_ptr> stack;
+    function_ptr node;
+    std::map<std::uint32_t, std::string> labels;
 };
 
 struct header
 {
-    std::uint32_t magic;                // HKS_DUMP_SIGNATURE 1B 4C 75 61 : 0x61754C1B
+    std::uint32_t magic;                // 0x61754C1B HKS_DUMP_SIGNATURE "\x1BLua" 
     std::uint8_t lua_version;           // 0x51
     std::uint8_t format_version;        // 0x0D
     std::uint8_t endianness;            // 0x01
     std::uint8_t size_of_int;           // 0x04
-    std::uint8_t size_of_size_t;        //  ?
+    std::uint8_t size_of_size_t;        // 0x08
     std::uint8_t size_of_intruction;    // 0x04
     std::uint8_t size_of_lua_number;    // 0x04
     std::uint8_t integral_flag;         // 0x01
     std::uint8_t build_flags;           // 0x03
     std::uint8_t referenced_mode;       // 0x01
-    std::uint32_t type_count;           // 13
+    std::uint32_t type_count;           // 0x0D
     std::vector<type_info> types;
 };
 
 struct file
 {
     header header;
-    std::unique_ptr<function> main;
+    function main;
 };
 
-using kst_ptr = std::unique_ptr<kst>;
-using header_ptr = std::unique_ptr<header>;
 using instruction_ptr = std::unique_ptr<instruction>;
-using function_ptr = std::unique_ptr<function>;
 using file_ptr = std::unique_ptr<file>;
 
 } // namespace lui

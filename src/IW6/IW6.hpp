@@ -8,8 +8,9 @@
 
 #include <utils.hpp>
 
+#include "assembler.hpp"
 #include "disassembler.hpp"
-#include "resolver.hpp"
+#include "decompiler.hpp"
 
 namespace IW6
 {
@@ -150,6 +151,9 @@ enum class opcode : std::uint8_t
 //  HKS_OPCODE_DELETE_BK = 0x5D,
     HKS_OPCODE_MAX = 0x5E,
 };
+
+auto opcode_id(const std::string& name) -> opcode;
+auto opcode_name(opcode id) -> std::string;
 
 } // namespace IW6
 

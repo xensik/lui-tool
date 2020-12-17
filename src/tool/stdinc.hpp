@@ -13,6 +13,7 @@ enum class mode
 {
     __,
     DISASM,
+    DECOMP,
 };
 
 enum class game

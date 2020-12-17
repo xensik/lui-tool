@@ -18,17 +18,17 @@ class disassembler : public lui::disassembler
 
 public:
     auto output() -> std::vector<std::uint8_t>;
+    auto output_d() -> lui::file_ptr;
     void disassemble(std::vector<std::uint8_t>& data);
     void disassemble_header();
     void disassemble_functions();
     void disassemble_prototype();
-    void disassemble_function(const lui::function_ptr& func);
-    void disassemble_instruction(const lui::function_ptr& func);
-    void disassemble_constant(const lui::function_ptr& func);
-    auto find_constant(const lui::function_ptr& func, std::int32_t index) -> lui::kst&;
-    void print_function(const lui::function_ptr& func);
-    void print_instruction(const lui::function_ptr& func, const lui::instruction_ptr& inst);
-    void print_instruction_data(const lui::instruction_ptr& inst); 
+    void disassemble_function(lui::function& func);
+    void disassemble_instruction(lui::function& func);
+    void disassemble_constant(lui::function& func);
+    void disassemble_fields(lui::function& func, std::uint32_t index);
+    auto find_constant(const lui::function& func, std::int32_t index) -> lui::kst;
+    void print_function(const lui::function& func);
 };
 
 } // namespace IW6
