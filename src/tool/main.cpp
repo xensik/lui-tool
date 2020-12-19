@@ -45,7 +45,10 @@ void assemble_file(lui::assembler& assembler, std::string file)
 
     assembler.assemble(data);
     
-    utils::file::save(file + ".luac", assembler.output());
+    if (overwrite_prompt(file + "_2.luac"))
+    {
+        utils::file::save(file + "_2.luac", assembler.output());
+    }
 }
 
 using namespace std::filesystem;
