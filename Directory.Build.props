@@ -1,0 +1,12 @@
+<Project>
+ <PropertyGroup>
+    <SrcRoot>$(MSBuildThisFileDirectory)</SrcRoot>
+    <OutputPath>$(SrcRoot)build\bin\$(Configuration)</OutputPath>
+    <BaseOutputPath>$(RepoRoot)build\bin</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(SrcRoot)build\obj</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(SrcRoot)build\obj\$(Configuration)\</IntermediateOutputPath>
+    <MSBUildProjectExtensionsPath>$(SrcRoot)build\obj\</MSBUildProjectExtensionsPath>
+    <OutDir>$(OutputPath)</OutDir>
+   <Deterministic>true</Deterministic>
+ </PropertyGroup>
+</Project>
