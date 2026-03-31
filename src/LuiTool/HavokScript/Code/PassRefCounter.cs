@@ -135,6 +135,10 @@ public class PassRefCounter : Visitor
         }
     }
 
+    public void Visit(BreakStatement node)
+    {
+    }
+
     public void Visit(ExpressionStatement node)
     {
         node.expression.Accept(this);

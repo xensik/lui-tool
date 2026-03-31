@@ -32,18 +32,22 @@ class Disassembler
         header = new HksHeader
         {
             Signature = reader.ReadUInt32(),
-            LuaVersion = reader.ReadUInt8(),
-            FormatVersion = DisassembleFormat(),
-            Endianness = (HksEndianness)reader.ReadUInt8(),
-            SizeofInt = reader.ReadUInt8(),
-            SizeofSizeT = reader.ReadUInt8(),
-            SizeofInstruction = reader.ReadUInt8(),
-            SizeofNumber = reader.ReadUInt8(),
-            IntegralFlag = (HksNumberType)reader.ReadUInt8(),
-            BuildFlags = reader.ReadUInt8(),
-            ReferencedMode = reader.ReadUInt8(),
-            TypeMeta = DisassembleTypeMeta()
+            LuaVersion = reader.ReadUInt8(), // 04
+            FormatVersion = DisassembleFormat(), // 05
+            Endianness = (HksEndianness)reader.ReadUInt8(), // 06
+            SizeofInt = reader.ReadUInt8(), // 07
+            SizeofSizeT = reader.ReadUInt8(), // 08
+            SizeofInstruction = reader.ReadUInt8(), // 09
+            SizeofNumber = reader.ReadUInt8(), // 0A
+            IntegralFlag = (HksNumberType)reader.ReadUInt8(), // 0B
+            BuildFlags = reader.ReadUInt8(), // 0C
+            ReferencedMode = reader.ReadUInt8(), // 0D
         };
+
+        if (header.Endianness == HksEndianness.BIG)
+            reader.SetLittleEndian(false);
+
+        header.TypeMeta = DisassembleTypeMeta(); // 0E?
 
         return header;
     }

@@ -170,13 +170,15 @@ public class ForInStatement : Statement
     public List<string> variables;
     public List<Expression> expressions;
     public Block body;
+    public int baseReg;
 
-    public ForInStatement(int addr, List<string> variables, List<Expression> expressions, Block body)
+    public ForInStatement(int addr, List<string> variables, List<Expression> expressions, Block body, int baseReg = -1)
     {
         this.Address = addr;
         this.variables = variables;
         this.expressions = expressions;
         this.body = body;
+        this.baseReg = baseReg;
     }
 
     public override void Accept(Visitor visitor)
@@ -286,6 +288,19 @@ public class ReturnStatement : Statement
     {
         this.Address = addr;
         this.expressions = expressions;
+    }
+
+    public override void Accept(Visitor visitor)
+    {
+        visitor.Visit(this);
+    }
+}
+
+public class BreakStatement : Statement
+{
+    public BreakStatement(int addr)
+    {
+        this.Address = addr;
     }
 
     public override void Accept(Visitor visitor)
@@ -663,10 +678,14 @@ public class AsmForLoop : Statement
 
 public class AsmTForLoop : Statement
 {
+    public int baseReg;
+    public int varCount;
 
-    public AsmTForLoop(int addr)
+    public AsmTForLoop(int addr, int baseReg, int varCount)
     {
         this.Address = addr;
+        this.baseReg = baseReg;
+        this.varCount = varCount;
     }
 
     public override void Accept(Visitor visitor)
@@ -691,6 +710,7 @@ public interface Visitor
     void Visit(LocalVariableDeclaration node);
     void Visit(AssignmentStatement node);
     void Visit(ReturnStatement node);
+    void Visit(BreakStatement node);
     void Visit(ExpressionStatement node);
 
     void Visit(VarargsLiteral node);

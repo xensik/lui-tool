@@ -1,4 +1,5 @@
 
+using System.Globalization;
 using System.Text;
 
 namespace LuiTool.Code;
@@ -121,7 +122,7 @@ public class CodePrinterVisitor : Visitor
         stringBuilder.Append(", ");
         node.limit.Accept(this);
     
-        if (node.step != null)
+        if (node.step != null && !(node.step is NumberLiteral stepLit && stepLit.value == 1.0))
         {
             stringBuilder.Append(", ");
             node.step.Accept(this);
@@ -281,6 +282,11 @@ public class CodePrinterVisitor : Visitor
         }
     }
 
+    public void Visit(BreakStatement node)
+    {
+        stringBuilder.Append("break");
+    }
+
     public void Visit(ExpressionStatement node)
     {
         node.expression.Accept(this);
@@ -342,7 +348,7 @@ public class CodePrinterVisitor : Visitor
 
     public void Visit(NumberLiteral node)
     {
-        stringBuilder.Append(node.value);
+        stringBuilder.Append(node.value.ToString(CultureInfo.InvariantCulture));
     }
 
     public void Visit(StringLiteral node)

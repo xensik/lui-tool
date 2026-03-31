@@ -147,6 +147,21 @@ public class PassWrapRegister : Visitor
     {
         for (var i = 0; i < node.expressions.Count; i++)
             node.expressions[i] = Swap(node.expressions[i]);
+
+        if (node.baseReg >= 0)
+        {
+            for (var i = 0; i < node.variables.Count; i++)
+            {
+                var name = $"var_{funcIndex}_{localCount++}";
+                node.variables[i] = name;
+                var regIdx = node.baseReg + 3 + i;
+                var id = new Identifier(node.Address, name);
+                while (stack.Count <= regIdx)
+                    stack.Add(null);
+                stack[regIdx] = id;
+            }
+        }
+
         node.body.Accept(this);
     }
 
@@ -277,6 +292,10 @@ public class PassWrapRegister : Visitor
         {
             node.expressions[i] = Swap(node.expressions[i]);
         }
+    }
+
+    public void Visit(BreakStatement node)
+    {
     }
 
     public void Visit(ExpressionStatement node)
