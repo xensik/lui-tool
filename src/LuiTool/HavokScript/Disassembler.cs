@@ -241,10 +241,49 @@ class Disassembler
     {
         var hasDebugInfo = reader.ReadUInt32();
 
-        if (hasDebugInfo == 1)
+        if (hasDebugInfo == 1) // HKS_BYTECODE_STRIPPING_ALL
         {
-            // T6: 1 + hash
             var hash = reader.ReadUInt32();
+        }
+        else if (hasDebugInfo == 40) // HKS_BYTECODE_STRIPPING_PROFILING or HKS_BYTECODE_STRIPPING_CALLSTACK_RECONSTRUCTION
+        {
+            var lineDefined = reader.ReadUInt32();
+            var lastLineDefined = reader.ReadUInt32();
+            var source = DisassembleString();
+            var name = DisassembleString();
+        }
+        else if (hasDebugInfo != 0) // HKS_BYTECODE_STRIPPING_NONE or HKS_BYTECODE_STRIPPING_DEBUG_ONLY
+        {
+            var lineDefined = reader.ReadUInt32();
+            var lastLineDefined = reader.ReadUInt32();
+            var source = DisassembleString();
+            var name = DisassembleString();
+
+            // dumpVector<hksInstruction> 
+            var instCount = DisassembleSize();
+
+            for (var i = 0u; i < instCount; i++)
+            {
+                var line = reader.ReadUInt32();
+            }
+
+            // dumpVector<hksLocalVar>
+            var localCount = reader.ReadUInt32();
+
+            for (var i = 0u; i < localCount; i++)
+            {
+                var varName = DisassembleString();
+                var startPC = reader.ReadUInt32();
+                var endPC = reader.ReadUInt32();
+            }
+
+            // dumpVector<hksUpval>
+            var upvalCount = reader.ReadUInt32();
+
+            for (var i = 0u; i < upvalCount; i++)
+            {
+                var upvalName = DisassembleString();
+            }
         }
 
         // T6, T7
@@ -260,7 +299,6 @@ class Disassembler
 
         // striplevel 2
         // var hash = reader.ReadUInt32();
-
         return new HksDebug();
     }
 

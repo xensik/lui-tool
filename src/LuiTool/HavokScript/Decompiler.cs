@@ -122,8 +122,7 @@ class Decompiler
             }
             case HksOpCode.TFORLOOP:
             {
-                //var exp = new Register(inst.Address, inst.Args[0].Value);
-                var stm = new AsmTForLoop(inst.Address);
+                var stm = new AsmTForLoop(inst.Address, inst.Args[0].Value, inst.Args[1].Value);
                 currSrc.body.statements.Add(stm);
                 break;
             }
@@ -233,6 +232,7 @@ class Decompiler
                 }
 
                 var stm = new AssignmentStatement(inst.Address, args, new NilLiteral(inst.Address));
+                currSrc.body.statements.Add(stm);
                 break;
             }
             case HksOpCode.LOADK: // A Bx    R(A) := Kst(Bx)
@@ -694,7 +694,6 @@ class Decompiler
                 break;
             }
             default:
-                break;
                 throw new DecompileException("unhandled opcode " + inst.Code.ToString());
         }
     }
@@ -756,6 +755,7 @@ class Decompiler
     private void DecompileFor(List<Statement> stmts, int begin, int end)
     {
         var addr = stmts[begin].Address;
+        var afterLoopAddr = stmts[end].Address + 4;
         var init = stmts[begin];
         var cond = stmts[begin + 1];
         var step = stmts[begin + 2];
@@ -776,6 +776,7 @@ class Decompiler
             stmts.RemoveAt(begin);
         }
 
+        ConvertBreakJumps(body, afterLoopAddr);
         DecompileStatements(body);
 
         stmts.Insert(begin, new ForStatement(addr, prep?.rvar, init, cond, step, new Block(addr, body)));
@@ -784,46 +785,120 @@ class Decompiler
     private void DecompileForEach(List<Statement> stmts, int begin, int end)
     {
         var addr = stmts[begin].Address;
+        var tforloop = (AsmTForLoop)stmts[end - 1];
+        var afterLoopAddr = stmts[end].Address + 4;
 
-        var body = new List<Statement>();
+        int baseReg = tforloop.baseReg;
+        int varCount = tforloop.varCount;
 
-        for (var j = 0; j <= end - begin; j++)
+        var variables = new List<string>();
+        for (var v = 0; v < varCount; v++)
+            variables.Add($"_v{v}");
+
+        // Find the CALL and forward JMP before begin
+        var expressions = new List<Expression>();
+        int startIdx = begin;
+
+        if (begin >= 2 && stmts[begin - 1] is Jump fwdJmp && fwdJmp.offset > 0
+            && stmts[begin - 2] is AssignmentStatement callAsn
+            && callAsn.values.Count == 1 && callAsn.values[0] is FunctionCall iterCall)
         {
-            body.Add(stmts[begin]);
-            stmts.RemoveAt(begin);
+            expressions.Add(iterCall);
+            startIdx = begin - 2;
         }
 
-        stmts.Insert(begin, new Block(addr, body));
+        // Remove backward JMP and TFORLOOP
+        stmts.RemoveAt(end);
+        stmts.RemoveAt(end - 1);
+        end -= 2;
+
+        // Remove CALL and forward JMP if found
+        if (startIdx < begin)
+        {
+            stmts.RemoveAt(startIdx);
+            stmts.RemoveAt(startIdx);
+            begin -= 2;
+            end -= 2;
+        }
+
+        // Extract body
+        var body = new List<Statement>();
+        var bodyCount = end - startIdx + 1;
+        for (var j = 0; j < bodyCount; j++)
+        {
+            body.Add(stmts[startIdx]);
+            stmts.RemoveAt(startIdx);
+        }
+
+        ConvertBreakJumps(body, afterLoopAddr);
+        DecompileStatements(body);
+
+        stmts.Insert(startIdx, new ForInStatement(addr, variables, expressions, new Block(addr, body), baseReg));
     }
 
     private void DecompileRepeatUntil(List<Statement> stmts, int begin, int end)
     {
         var addr = stmts[begin].Address;
+        var afterLoopAddr = stmts[end].Address + 4;
 
+        var test = (Test)stmts[end - 1];
+        var condition = test.expression;
+
+        // Remove backward JMP and Test
+        stmts.RemoveAt(end);
+        stmts.RemoveAt(end - 1);
+        end -= 2;
+
+        // Extract body
         var body = new List<Statement>();
-
         for (var j = 0; j <= end - begin; j++)
         {
             body.Add(stmts[begin]);
             stmts.RemoveAt(begin);
         }
 
-        stmts.Insert(begin, new Block(addr, body));
+        ConvertBreakJumps(body, afterLoopAddr);
+        DecompileStatements(body);
+
+        stmts.Insert(begin, new RepeatUntilStatement(addr, condition, new Block(addr, body)));
     }
 
     private void DecompileWhile(List<Statement> stmts, int begin, int end)
     {
         var addr = stmts[begin].Address;
+        var afterLoopAddr = stmts[end].Address + 4;
 
+        Expression condition;
+
+        if (stmts[begin] is Test test && begin + 1 <= end && stmts[begin + 1] is Jump condJmp && condJmp.offset > 0)
+        {
+            condition = test.expression;
+            stmts.RemoveAt(begin);
+            stmts.RemoveAt(begin);
+            end -= 2;
+        }
+        else
+        {
+            condition = new BooleanLiteral(addr, true);
+        }
+
+        // Remove backward JMP
+        stmts.RemoveAt(end);
+        end--;
+
+        // Extract body
         var body = new List<Statement>();
-
         for (var j = 0; j <= end - begin; j++)
         {
             body.Add(stmts[begin]);
             stmts.RemoveAt(begin);
         }
 
-        stmts.Insert(begin, new Block(addr, body));
+        ConvertBreakJumps(body, afterLoopAddr);
+        ConvertContinueJumps(body, addr);
+        DecompileStatements(body);
+
+        stmts.Insert(begin, new WhileStatement(addr, condition, new Block(addr, body)));
     }
 
     private void DecompileConditionals(List<Statement> stmts)
@@ -892,9 +967,21 @@ class Decompiler
             DecompileStatements(elseBody);
 
             var ifBlock = new Block(addr, ifBody);
-            elseBlock = new Block(addr, elseBody);
+            var elseifBlocks = new List<ElseIfBlock>();
+            Block finalElseBlock;
 
-            stmts.Insert(testIdx, new IfStatement(addr, condition, ifBlock, new List<ElseIfBlock>(), elseBlock));
+            if (elseBody.Count == 1 && elseBody[0] is IfStatement innerIf)
+            {
+                elseifBlocks.Add(new ElseIfBlock(innerIf.Address, innerIf.test, innerIf.ifBlock));
+                elseifBlocks.AddRange(innerIf.elseifBlocks);
+                finalElseBlock = innerIf.elseBlock;
+            }
+            else
+            {
+                finalElseBlock = new Block(addr, elseBody);
+            }
+
+            stmts.Insert(testIdx, new IfStatement(addr, condition, ifBlock, elseifBlocks, finalElseBlock));
         }
         else
         {
@@ -930,6 +1017,62 @@ class Decompiler
         }
 
         return stmts.Count;
+    }
+
+    private void ConvertBreakJumps(List<Statement> stmts, int afterLoopAddr)
+    {
+        for (var i = 0; i < stmts.Count; i++)
+        {
+            if (stmts[i] is Jump jmp && jmp.offset > 0)
+            {
+                var target = (jmp.Address + 4) + (jmp.offset * 4);
+                if (target >= afterLoopAddr)
+                {
+                    stmts[i] = new BreakStatement(jmp.Address);
+                }
+            }
+        }
+    }
+
+    private void ConvertContinueJumps(List<Statement> stmts, int loopStartAddr)
+    {
+        for (var j = stmts.Count - 1; j >= 1; j--)
+        {
+            if (stmts[j] is Jump bwd && bwd.offset < 0)
+            {
+                var bwdTarget = (bwd.Address + 4) + (bwd.offset * 4);
+                if (bwdTarget != loopStartAddr) continue;
+
+                if (stmts[j - 1] is Test breakTest)
+                {
+                    Statement breakStmt;
+                    if (j + 1 < stmts.Count && stmts[j + 1] is Jump fwd && fwd.offset > 0)
+                    {
+                        breakStmt = new BreakStatement(fwd.Address);
+                        stmts.RemoveAt(j + 1);
+                    }
+                    else if (j + 1 < stmts.Count && stmts[j + 1] is BreakStatement existingBreak)
+                    {
+                        breakStmt = existingBreak;
+                        stmts.RemoveAt(j + 1);
+                    }
+                    else
+                    {
+                        stmts.RemoveAt(j);
+                        continue;
+                    }
+
+                    var ifBody = new Block(breakTest.Address, new List<Statement> { breakStmt });
+                    var ifStmt = new IfStatement(breakTest.Address, breakTest.expression, ifBody, new List<ElseIfBlock>(), null);
+                    stmts.RemoveAt(j);
+                    stmts[j - 1] = ifStmt;
+                }
+                else
+                {
+                    stmts.RemoveAt(j);
+                }
+            }
+        }
     }
 
     private void ResolveClosures(Block block, List<FunctionStatement> subfuncs)
@@ -973,6 +1116,10 @@ class Decompiler
                     ResolveClosures(elif.block, subfuncs);
                 if (ifs.elseBlock != null)
                     ResolveClosures(ifs.elseBlock, subfuncs);
+            }
+            else if (stmt is ForInStatement fis)
+            {
+                ResolveClosures(fis.body, subfuncs);
             }
             else if (stmt is DoStatement ds)
             {
