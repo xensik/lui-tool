@@ -82,6 +82,7 @@ public class CodePrinterVisitor : Visitor
 
         foreach (var elseifBlock in node.elseifBlocks)
         {
+            stringBuilder.Append("\n");
             stringBuilder.AppendFormat("{0, " + indent.ToString() + "}", string.Empty);
             stringBuilder.Append("elseif ");
             elseifBlock.condition.Accept(this);
@@ -91,12 +92,15 @@ public class CodePrinterVisitor : Visitor
 
         if (node.elseBlock != null)
         {
+            stringBuilder.Append("\n");
             stringBuilder.AppendFormat("{0, " + indent.ToString() + "}", string.Empty);
             stringBuilder.Append("else\n");
             node.elseBlock.Accept(this);
         }
 
-        stringBuilder.Append("\nend");
+        stringBuilder.Append("\n");
+        stringBuilder.AppendFormat("{0, " + indent.ToString() + "}", string.Empty);
+        stringBuilder.Append("end");
     }
 
     public void Visit(ElseIfBlock node)
@@ -139,7 +143,11 @@ public class CodePrinterVisitor : Visitor
             stringBuilder.Append(variable);
             stringBuilder.Append(", ");
         }
-        stringBuilder.Append("in ");
+
+        if (node.variables.Count > 0)
+            stringBuilder.Remove(stringBuilder.Length - 2, 2);
+
+        stringBuilder.Append(" in ");
 
         foreach (var expression in node.expressions)
         {
@@ -147,7 +155,8 @@ public class CodePrinterVisitor : Visitor
             stringBuilder.Append(", ");
         }
 
-        stringBuilder.Remove(stringBuilder.Length - 2, 2);
+        if (node.expressions.Count > 0)
+            stringBuilder.Remove(stringBuilder.Length - 2, 2);
         stringBuilder.Append(" do\n");
         node.body.Accept(this);
         stringBuilder.Append("\n");
@@ -157,15 +166,17 @@ public class CodePrinterVisitor : Visitor
 
     public void Visit(FunctionStatement node)
     {
-        stringBuilder.Append("function ");
-
-        if (node.name != null)
+        if (node.name == null || node.name.name == "")
         {
-            node.name.Accept(this);
-            //stringBuilder.Append(".");
+            // anonymous function (closure used as expression)
+            stringBuilder.Append("function (");
         }
-
-        stringBuilder.Append("(");
+        else
+        {
+            stringBuilder.Append("function ");
+            node.name.Accept(this);
+            stringBuilder.Append("(");
+        }
 
         foreach (var parameter in node.parameters)
         {
@@ -256,14 +267,23 @@ public class CodePrinterVisitor : Visitor
     {
         stringBuilder.Append("return");
 
-        foreach (var expression in node.expressions)
-        {
-            expression.Accept(this);
-            stringBuilder.Append(", ");
-        }
-
         if (node.expressions.Count > 0)
+        {
+            stringBuilder.Append(" ");
+
+            foreach (var expression in node.expressions)
+            {
+                expression.Accept(this);
+                stringBuilder.Append(", ");
+            }
+
             stringBuilder.Remove(stringBuilder.Length - 2, 2);
+        }
+    }
+
+    public void Visit(ExpressionStatement node)
+    {
+        node.expression.Accept(this);
     }
 
     public void Visit(Identifier node)
@@ -273,17 +293,41 @@ public class CodePrinterVisitor : Visitor
 
     public void Visit(FunctionCall node)
     {
-        node.function.Accept(this);
-        stringBuilder.Append("(");
-
-        foreach (var variable in node.arguments)
+        if (node.isMethodCall && node.function is TableAccess ta)
         {
-            variable.Accept(this);
-            stringBuilder.Append(", ");
-        }
+            // method call: obj:method(args) — skip first argument (self)
+            ta.table.Accept(this);
+            stringBuilder.Append(":");
+            ta.key.Accept(this);
+            stringBuilder.Append("(");
 
-        stringBuilder.Remove(stringBuilder.Length - 2, 2);
-        stringBuilder.Append(")");
+            for (var i = 1; i < node.arguments.Count; i++)
+            {
+                node.arguments[i].Accept(this);
+                stringBuilder.Append(", ");
+            }
+
+            if (node.arguments.Count > 1)
+                stringBuilder.Remove(stringBuilder.Length - 2, 2);
+
+            stringBuilder.Append(")");
+        }
+        else
+        {
+            node.function.Accept(this);
+            stringBuilder.Append("(");
+
+            foreach (var variable in node.arguments)
+            {
+                variable.Accept(this);
+                stringBuilder.Append(", ");
+            }
+
+            if (node.arguments.Count > 0)
+                stringBuilder.Remove(stringBuilder.Length - 2, 2);
+
+            stringBuilder.Append(")");
+        }
     }
 
     public void Visit(NilLiteral node)
@@ -329,22 +373,81 @@ public class CodePrinterVisitor : Visitor
     }
 
 
+    public void Visit(FunctionExpression node)
+    {
+        stringBuilder.Append("function (");
+
+        foreach (var parameter in node.parameters)
+        {
+            stringBuilder.Append(parameter);
+            stringBuilder.Append(", ");
+        }
+
+        if (node.parameters.Count > 0)
+        {
+            stringBuilder.Remove(stringBuilder.Length - 2, 2);
+        }
+
+        stringBuilder.Append(")\n");
+        node.body.Accept(this);
+        stringBuilder.Append("\nend");
+    }
+
     public void Visit(TableConstructor node)
     {
-        // stringBuilder.Append("{");
-        // foreach (var field in node.fields) {
-        //     field.Accept(this);
-        //     stringBuilder.Append(", ");
-        // }
-        // stringBuilder.Append("}");
+        if (node.keys.Count == 0)
+        {
+            stringBuilder.Append("{}");
+            return;
+        }
+
+        stringBuilder.Append("{\n");
+        indent += 4;
+
+        for (var i = 0; i < node.keys.Count; i++)
+        {
+            stringBuilder.AppendFormat("{0, " + indent.ToString() + "}", string.Empty);
+
+            if (node.keys[i] is Identifier id)
+            {
+                stringBuilder.Append(id.name);
+                stringBuilder.Append(" = ");
+            }
+            else if (node.keys[i] != null)
+            {
+                stringBuilder.Append("[");
+                node.keys[i].Accept(this);
+                stringBuilder.Append("] = ");
+            }
+
+            node.values[i].Accept(this);
+
+            if (i < node.keys.Count - 1)
+                stringBuilder.Append(",");
+
+            stringBuilder.Append("\n");
+        }
+
+        indent -= 4;
+        stringBuilder.AppendFormat("{0, " + indent.ToString() + "}", string.Empty);
+        stringBuilder.Append("}");
     }
 
     public void Visit(TableAccess node)
     {
         node.table.Accept(this);
-        stringBuilder.Append(".");
-        node.key.Accept(this);
-        //stringBuilder.Append("]");
+
+        if (node.isDotAccess)
+        {
+            stringBuilder.Append(".");
+            node.key.Accept(this);
+        }
+        else
+        {
+            stringBuilder.Append("[");
+            node.key.Accept(this);
+            stringBuilder.Append("]");
+        }
     }
 
 

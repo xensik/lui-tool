@@ -294,6 +294,22 @@ public class ReturnStatement : Statement
     }
 }
 
+public class ExpressionStatement : Statement
+{
+    public Expression expression;
+
+    public ExpressionStatement(int addr, Expression expression)
+    {
+        this.Address = addr;
+        this.expression = expression;
+    }
+
+    public override void Accept(Visitor visitor)
+    {
+        visitor.Visit(this);
+    }
+}
+
 public class Closure : Expression
 {
     public int index;
@@ -348,12 +364,14 @@ public class FunctionCall : Expression
 {
     public Expression function;
     public List<Expression> arguments;
+    public bool isMethodCall;
 
-    public FunctionCall(int addr, Expression function, List<Expression> arguments)
+    public FunctionCall(int addr, Expression function, List<Expression> arguments, bool isMethodCall = false)
     {
         this.Address = addr;
         this.function = function;
         this.arguments = arguments;
+        this.isMethodCall = isMethodCall;
     }
 
     public override void Accept(Visitor visitor)
@@ -493,16 +511,38 @@ public class TableConstructor : Expression
     }
 }
 
+public class FunctionExpression : Expression
+{
+    public List<string> parameters;
+    public Block body;
+    public List<int> upvalueMapping;
+
+    public FunctionExpression(int addr, List<string> parameters, Block body, List<int> upvalueMapping = null)
+    {
+        this.Address = addr;
+        this.parameters = parameters;
+        this.body = body;
+        this.upvalueMapping = upvalueMapping;
+    }
+
+    public override void Accept(Visitor visitor)
+    {
+        visitor.Visit(this);
+    }
+}
+
 public class TableAccess : Expression
 {
     public Expression table;
     public Expression key;
+    public bool isDotAccess;
 
-    public TableAccess(int addr, Expression table, Expression key)
+    public TableAccess(int addr, Expression table, Expression key, bool isDotAccess = false)
     {
         this.Address = addr;
         this.table = table;
         this.key = key;
+        this.isDotAccess = isDotAccess;
     }
 
     public override void Accept(Visitor visitor)
@@ -651,6 +691,7 @@ public interface Visitor
     void Visit(LocalVariableDeclaration node);
     void Visit(AssignmentStatement node);
     void Visit(ReturnStatement node);
+    void Visit(ExpressionStatement node);
 
     void Visit(VarargsLiteral node);
     void Visit(NilLiteral node);
@@ -664,6 +705,7 @@ public interface Visitor
     void Visit(BinaryExpression node);
     void Visit(UnaryExpression node);
     void Visit(TableConstructor node);
+    void Visit(FunctionExpression node);
     void Visit(TableAccess node);
 
 
