@@ -3,7 +3,7 @@ namespace LuiTool.HavokScript.Assembly;
 
 public enum HksStrippingLevel : byte
 {
-    NONE = 0x0,         // no DebugInfo
+    NONE = 0x0,         // full DebugInfo
     PROFILING = 0x1,
     ALL = 0x2,          // 1 + hash
     DEBUG_ONLY = 0x3,
